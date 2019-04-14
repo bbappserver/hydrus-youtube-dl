@@ -6,6 +6,8 @@ import json
 import shutil
 import time
 import signal
+import re
+import traceback
 from subprocess import Popen
 from hydrus import Client,ImportStatus
 
@@ -25,6 +27,7 @@ def warn(message,timeout=10):
 
 
 def run():
+    args = sys.argv
     tdir=None
     try:
         key=None
@@ -34,53 +37,65 @@ def run():
             key=input("hydrus access key (set HYDRUS_YTDL_KEY to supress this)")
         
         c=Client(access_key=key)
-        if c.get_url_files(args[-1]).status == ImportStatus.Importable:
+        r=c.get_url_files(args[-1])
+        choice ="y"
+        if len(r["url_file_statuses"])!=0 and r["url_file_statuses"][0]["status"]!=ImportStatus.Importable:
+            choice = input("Not importable because of status"+ str(r["url_file_statuses"][0]["status"]) +"\tproceed anyway?")
+        if choice !='y':
+            print("Aborted")
+            exit(-2)
 
-            tdir = tempfile.mkdtemp()
-            os.chdir(tdir)
+        tdir = tempfile.mkdtemp()
+        os.chdir(tdir)
+        
+        args[0]=shutil.which("youtube-dl")
+        if "--write-info-json" not in args:
+            args.insert(1,"--write-info-json") #add info json flag just before url
+        print(args)
+        p=Popen(args)
+        p.wait()
+        status = p.returncode
+
+        if status == 0:
+            #success
             
-            args.insert(0,shutil.which("youtube-dl"))
-            if "--write-info-json" not in args:
-                args.insert(1,"--write-info-json") #add info json flag just before url
-            print(args)
-            p=Popen(args)
-            p.wait()
-            status = p.returncode
+            for f in os.listdir("."):
+                if not f.endswith(".json"):
+                    p=os.path.abspath(f)
+                    r = c.add_file(p)
+                    fhash=r["hash"]
+                    p = re.sub("\.[^\.]+$",".info.json",p)
+                    info={}
+                    try:
+                        with open(p) as f:
+                            info = json.load(f)
+                        source=info["webpage_url"]
+                        title=info["title"]
+                        uploader=info["uploader"]
+                        tags=info["tags"]
+                        tags.append("title:"+title)
+                        tags.append("creator:"+uploader)
 
-            if status == 0:
-                #success
-                
-                for f in os.listdir("."):
-                    if not f.endswith(".json"):
-                        p=os.path.abspath(f)
-                        r = c.add_file(p)
-                        fhash=r["hash"]
-                        p = p.replace(r"\.[^\.]*$",".info.json")
-                        info={}
-                        try:
-                            with open(p) as f:
-                                info = json.load(f)
-                            source=info["webpage_url"]
-                            title=info["title"]
-                            uploader=info["uploader"]
-                            tags=info["tags"]
-                            tags.append("title:"+title)
-                            tags.append("creator:"+uploader)
+                        if "uploader_id" in info:
+                            tags.append("creator:"+info["uploader_id"])
+                        notes = info["description"] if "description" in info else None
+                        
+                        c.associate_url([fhash], [source], [])
+                        c.add_tags([fhash], services_to_tags={"public tag repository" : tags})
 
-                            if "uploader_id" in info:
-                                tags.append("creator:"+info["uploader_id"])
-                            
-                            c.associate_url([fhash], [source], [])
-                            c.add_tags([fhash], services_to_tags={"public tag repository" : tags})
-                        except json.JSONDecodeError:
-                            print("The info json youtube-dl provided was an invalid format")
-                        except KeyError:
-                            print("Youtube dl did ot supply one ore more necessary keys")
-                        except Exception as e:
-                            if not debug:
-                                print("Downloaded but failed to sendto hydrus")
-                else:
-                    exit(status)
+                        if notes is not None:
+                            pass
+                            #c.add_note(notes)
+                    except json.JSONDecodeError:
+                        print("The info json youtube-dl provided was an invalid format")
+                    except KeyError:
+                        print("Youtube dl did ot supply one ore more necessary keys")
+                    except Exception as e:
+                        if not debug:
+                            print("Downloaded but failed to sendto hydrus")
+                            traceback.print_tb(None)
+            else:
+                exit(status)
     finally:
         shutil.rmtree(tdir)
 
