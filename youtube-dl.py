@@ -15,15 +15,16 @@ debug=False
 tdir=None
 
 def warn(message,timeout=10):
-    signal.alarm(timeout)
-    ok="y"
-    try:
-        ok=input(message)
-    except:
-        pass
-    signal.alarm(0)
-    if ok != "y":
-        exit(-1)
+    print("WARNING",message)
+ #   signal.alarm(timeout)
+ #   ok="y"
+ #   try:
+ #       ok=input(message)
+ #   except:
+ #       pass
+ #   signal.alarm(0)
+ #   if ok != "y":
+ #       exit(-1)
 
 
 def run():
